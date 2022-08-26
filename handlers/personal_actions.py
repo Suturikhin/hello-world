@@ -20,16 +20,27 @@ class client:
 # sample of client list creation for admin tab:
 # clients = [client(name,ID) for name,ID in names,IDs]
 
+
 # создаём форму и указываем поля
 class Form(StatesGroup):
     name = State()
+    admin_id = State() # ID ответственного бухгалтера
+    admin_name = State() # имя ответственного бухгалтера
+    company_description = State() # название компании (description)
+    company_id = State() # идентификатор компании (id)
+    company_user_id = State # идентификатор пользователя в телеграм (user_id)
+    msg = State() # текстовое сообщение для компании
+    docs = State() # заполнить поле ожидаемых документов для компании
+
+
 
 # обработка команды start
 @dp.message_handler(commands = "start")
 async def start(message: types.Message):
     if(not BotDB.user_exists(message.from_user.id)):
         BotDB.add_user(message.from_user.id)
-        await message.bot.send_message(message.from_user.id, "Похоже, вы первый раз здесь. Введите сообщение с названием вашей фирмы и нажмите Enter")
+        await message.bot.send_message(message.from_user.id, "Похоже, вы первый раз здесь. "
+                                                             "Введите сообщение с названием вашей фирмы и нажмите Enter")
         await Form.name.set()
     else:
         button_docs = KeyboardButton('/Документы')
@@ -37,6 +48,7 @@ async def start(message: types.Message):
         button_sent = KeyboardButton('/Отправил(а)')
         markup3 = ReplyKeyboardMarkup(resize_keyboard=True).add(button_docs).add(button_ball).add(button_sent)
         await message.bot.send_message(message.from_user.id, "С возвращением!", reply_markup=markup3)
+
 
 # обработка введения описания фирмы
 @dp.message_handler(state=Form.name)
@@ -158,7 +170,7 @@ async def text_handler(msg: types.Message):
 #обработка сообщения с именем админа - выгрузка всех компаний, за которые он ответственнен
 @dp.message_handler(commands = "getadmin")
 async def start(message: types.Message):
-    #нужно прикрутить проверку через пароль для доступа в админ базу
+    #TO DO: нужно прикрутить проверку через пароль для доступа в админ базу
     await message.bot.send_message(message.from_user.id, "Я проверяю всех админов в базе")
     admins_list = BotDB.getadmin_reply()
     print(admins_list)
@@ -189,10 +201,129 @@ async def start(message: types.Message):
 
     await message.bot.send_message(message.from_user.id, f"Текущий список компаний бухгалтера {current_admin}", reply_markup=markup_users)
 
+# Здесь предлагаем действия с компанией и запоминаем её ID
+@dp.message_handler(lambda message: 'компания ' in message.text.lower() and message.text)
+async def process_company_tools(message: types.Message, state: FSMContext):
+    print(message.text)
+    company_description = message.text.split(' ')[1]
+    company_id = BotDB.get_company_id(company_description)
+    company_user_id = BotDB.get_company_user_id(company_id)
+    async with state.proxy() as data:
+        data['company_id'] = company_id
+    async with state.proxy() as data:
+        data['company_description'] = company_description
+    async with state.proxy() as data:
+        data['company_user_id'] = company_user_id
+
+    #await state.finish()
+    print(data['company_id'], data['company_description'])
+
+    button_message = KeyboardButton(f'Отправить сообщение')
+    button_documents = KeyboardButton(f'Запросить документы')
+    button_change_admin = KeyboardButton(f'Поменять бухгалтера')
+    button_change_name = KeyboardButton(f'Поменять название')
+    markup = ReplyKeyboardMarkup(resize_keyboard=True).add(button_message).add(button_documents).\
+        add(button_change_admin).add(button_change_name)
+    await message.bot.send_message(message.from_user.id,
+                                   f"Выберите действие для компании {company_description}!", reply_markup=markup)
+
+
+@dp.message_handler(lambda message: 'Отправить сообщение' in message.text, state='*')
+async def asc_for_msg(message: types.Message, state=FSMContext):
+    """Реагируем на команду отправки сообщения для компании"""
+    async with state.proxy() as data:
+        message_for_company = data['company_description']
+    await message.bot.send_message(message.from_user.id, f"Введите сообщение для компании {message_for_company}")
+    await Form.msg.set()
+
+
+@dp.message_handler(state=Form.msg)
+async def process_msg_to_company(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['msg'] = message.text
+        telegram_id = data['company_user_id']
+        description = data['company_description']
+        company_id = data['company_id']
+    await message.bot.send_message(telegram_id, f"{data['msg']}")
+    await message.reply(f'Сообщение компании {description} отправлено')
+    #state.reset_state()
+    await state.finish() # плохое место, все стейты нужно заново переназначать, нужно переделать
+    print(company_id)
+
+    async with state.proxy() as data:
+         data['company_user_id'] = telegram_id
+         data['company_description'] = description
+         data['company_id'] = company_id
+    # возвращаем меню на место
+    button_message = KeyboardButton(f'Отправить сообщение')
+    button_documents = KeyboardButton(f'Запросить документы')
+    button_change_admin = KeyboardButton(f'Поменять бухгалтера')
+    button_change_name = KeyboardButton(f'Поменять название')
+    markup = ReplyKeyboardMarkup(resize_keyboard=True).add(button_message).add(button_documents). \
+        add(button_change_admin).add(button_change_name)
+    await message.bot.send_message(message.from_user.id,
+                                   f"Выберите действие для компании {description}", reply_markup=markup)
+
+
+@dp.message_handler(lambda message: 'Запросить документы' in message.text, state='*')
+async def ask_for_docs(message: types.Message, state=FSMContext):
+    """Заполняем ожидаемые документы для компании и уведомляем об этом"""
+    async with state.proxy() as data:
+        message_for_company = data['company_description']
+    await message.bot.send_message(message.from_user.id, f"Перечислите документы для компании {message_for_company}")
+    await Form.docs.set()
+
+
+@dp.message_handler(state=Form.docs)
+async def process_docs_to_company(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['docs'] = message.text
+        telegram_id = data['company_user_id']
+        description = data['company_description']
+        company_id = data['company_id']
+    # метод, заполняющий документы и выставляющий флаг notify
+    BotDB.update_docs(company_id, data['docs'])
+    await message.reply(f'Документы для компании {description} обновлены')
+    await state.finish()
+    async with state.proxy() as data:
+        data['company_user_id'] = telegram_id
+        data['company_description'] = description
+        data['company_id'] = company_id
+    button_message = KeyboardButton(f'Отправить сообщение')
+    button_documents = KeyboardButton(f'Запросить документы')
+    button_change_admin = KeyboardButton(f'Поменять бухгалтера')
+    button_change_name = KeyboardButton(f'Поменять название')
+    markup = ReplyKeyboardMarkup(resize_keyboard=True).add(button_message).add(button_documents)\
+        .add(button_change_admin).add(button_change_name)
+    await message.bot.send_message(message.from_user.id,
+                                   f"Выберите действие для компании {description}", reply_markup=markup)
+
+
+@dp.message_handler(lambda message: 'Поменять бухгалтера' in message.text, state='*')
+async def ask_for_docs(message: types.Message, state=FSMContext):
+    """Заполняем ожидаемые документы для компании и уведомляем об этом"""
+    #1. выводим текущего бухгалтера +
+    #2. выводим список доступных бухгалтеров через кнопки
+    #3. захватываем ввод с кнопки
+    #4. меняем responsible у конкретного клиента
+    async with state.proxy() as data:
+        company_description = data['company_description']
+        company_id = data['company_id']
+        company_telegram_id = data['company_user_id']
+    responsible_id = BotDB.get_responsible_id(company_description)
+    responsible_surname = BotDB.get_admin_surname(responsible_id)
+    await message.bot.send_message(message.from_user.id, f"Текущий бухгалтер компании {company_description} - {responsible_surname}\n"
+                                                         f"Выберите нового бухгалтера из списка ниже")
+
+
+
+
+
 
 @dp.message_handler()
 async def send_message(msg: types.Message):
     await msg.reply("Взаимодействие с ботом только по кнопкам, на сообщения бот реагировать пока не умеет 😊")
+
 
 
 # @dp.message_handler(commands = ("sent", "s"), commands_prefix = "/!")

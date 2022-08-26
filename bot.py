@@ -12,7 +12,9 @@ from db import BotDB
 async def scheduled(wait_for=3600):
     while True:
         try:
-            await bot.send_message(BotDB.check_notify(), f"Изменился статус ваших документов!\nМяч на вашей стороне\nПроверить нужные документы можно командой /Документы", disable_notification = True)
+            await bot.send_message(BotDB.check_notify(), f"Изменился статус ваших документов!\nМяч на вашей стороне\n"
+                                                         f"Проверить нужные документы можно командой /Документы",
+                                   disable_notification=True)
         except:
             print("nobody to update")
             await asyncio.sleep(wait_for)

@@ -30,7 +30,7 @@ class BotDB:
         return self.conn.commit()
 
     def add_record(self, user_id, side, note_from_client):
-        """Создаем запись о доходах/расходах"""
+        """Создаем запись об ожидаемых документах и сопутствующей инфе"""
         self.cursor.execute("INSERT INTO `records` (`user_id`, `side`, `note_from_client`) VALUES (?, ?, ?)",
                             (self.get_user_id(user_id),
                              side,
@@ -55,6 +55,14 @@ class BotDB:
         self.cursor.execute("UPDATE records SET side=?, note_from_client=? where user_id=? and documents=?",
                             (side, note_from_client, self.get_user_id(user_id), documents,))
         return self.conn.commit()
+
+
+    def update_docs(self, user_id, documents, side=1):
+        """Обноляем список ожидаемых документов"""
+        self.cursor.execute("UPDATE records SET documents=?, side=? WHERE user_id=?",
+                            (documents, side, user_id,))
+        return self.conn.commit()
+
 
     def update_side(self, user_id, documents, side=0):
         """Обновляем статус 'мяча', возвращаем на сторону охотников"""
@@ -86,7 +94,7 @@ class BotDB:
         # else:
         #     return 0
 
-    # 31.03.2022
+    # 31.03.2022 - done
     # Задача - выгрузить список клиентов с их ID и идентификатором в словарь для публикации в чат
     # и дальнейшей обработки через команды чата по соответствию конкретному админу.
     # Пока фокус на выгрузке, здесь должен быть метод
@@ -111,6 +119,40 @@ class BotDB:
         result = self.cursor.execute("SELECT user_id, description FROM users WHERE responsible = ? ORDER BY join_date",
                                      (self.get_admin_id(surname),))
         return result.fetchall()
+
+    #===============
+    #TO DO: 27.07.22
+    #===============
+    # При выборе компании должны быть варианты действий (мы должны хранить текущую компанию в памяти):
+    # + отправить сообщение
+    # - запросить документы
+    # - поменять администратора
+    # - поменять название компании
+
+    #ищем ID компании по её description - названию
+    def get_company_id(self, description):
+        """Достаём id пользователя (компании) по его description"""
+        result = self.cursor.execute("SELECT `id` FROM `users` WHERE `description` = ?", (description,))
+        return str(result.fetchone()[0])
+
+
+    def get_company_user_id(self, id):
+        """Достаём telegram ID компании по её id в базе"""
+        result = self.cursor.execute("SELECT `user_id` FROM `users` WHERE `id` = ?", (id,))
+        return str(result.fetchone()[0])
+
+
+    def get_responsible_id(self, description):
+        """Достаем ответственного ID бухгалтера по названию компании"""
+        result = self.cursor.execute("SELECT `responsible` FROM `users` WHERE `description` = ?", (description,))
+        return str(result.fetchone()[0])
+
+
+    def get_admin_surname(self, id):
+        """Достаем фамилию админа-бухгалтера в базе по его ID в records"""
+        result = self.cursor.execute("SELECT `surname` FROM `admins` WHERE `id` = ?", (id,))
+        return str(result.fetchone()[0])
+
 
 
     def close(self):
